@@ -234,6 +234,7 @@
 
 <div class="usage">
   <strong>使い方</strong><br>
+  ・このHTMLと地図スクショを<strong>同じフォルダ</strong>に置いてブラウザで開く<br>
   ・ピンに<strong>ホバー</strong>すると名前と座標が表示される<br>
   ・ピンを<strong>クリック</strong>すると座標をクリップボードにコピー<br>
   ・ピンがズレてる場合は上の<strong>スライダーで枠サイズを調整</strong>してね
@@ -346,6 +347,31 @@ function isInRange(x, z) {
   return x >= MAP_MIN_X && x <= MAP_MAX_X && z >= MAP_MIN_Z && z <= MAP_MAX_Z;
 }
 
+// ─── コピー共通関数(https必須のClipboard APIが使えない場合にフォールバック) ───
+function copyText(text, onSuccess) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onSuccess).catch(() => fallbackCopy(text, onSuccess));
+  } else {
+    fallbackCopy(text, onSuccess);
+  }
+}
+function fallbackCopy(text, onSuccess) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand("copy");
+    onSuccess();
+  } catch(e) {
+    console.warn("コピー失敗:", e);
+  }
+  document.body.removeChild(ta);
+}
+
 // ─── ピン生成 ────────────────────────────────────────────────
 const pinsLayer  = document.getElementById("pinsLayer");
 const tooltip    = document.getElementById("tooltip");
@@ -384,23 +410,16 @@ function makePin(config) {
   pin.appendChild(lbl);
 
   if (isMobile) {
-    // ── タッチ用: タップでツールチップ表示、もう一度タップで閉じる ──
+    // ── タッチ用: タップでツールチップ表示、閉じるは他の場所タップのみ ──
     pin.addEventListener("touchend", (e) => {
       e.preventDefault();
-      const alreadyOpen = tooltip.style.display === "block" &&
-                          ttName.textContent === name;
-      if (alreadyOpen) {
-        tooltip.style.display = "none";
-      } else {
-        ttName.textContent  = name;
-        ttType.textContent  = typeLabel || "";
-        ttCoord.textContent = `X: ${x}  Y: ${y}  Z: ${z}`;
-        // ピンの位置を基準にツールチップを表示
-        const rect = pin.getBoundingClientRect();
-        tooltip.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
-        tooltip.style.top  = (rect.top - 90) + "px";
-        tooltip.style.display = "block";
-      }
+      ttName.textContent  = name;
+      ttType.textContent  = typeLabel || "";
+      ttCoord.textContent = `X: ${x}  Y: ${y}  Z: ${z}`;
+      const rect = pin.getBoundingClientRect();
+      tooltip.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
+      tooltip.style.top  = (rect.top - 90) + "px";
+      tooltip.style.display = "block";
     });
     // タッチ用コピー(ツールチップが開いてる状態で500ms長押し)
     let holdTimer = null;
@@ -408,7 +427,7 @@ function makePin(config) {
       e.preventDefault(); // 長押しメニュー・テキスト選択を阻止
       holdTimer = setTimeout(() => {
         const text = `${name}  X:${x} Y:${y} Z:${z}`;
-        navigator.clipboard.writeText(text).then(() => {
+        copyText(text, () => {
           lbl.textContent = "コピーしました!";
           lbl.style.opacity = "1";
           setTimeout(() => { lbl.textContent = name; lbl.style.opacity = ""; }, 1500);
@@ -431,7 +450,7 @@ function makePin(config) {
     pin.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
     pin.addEventListener("click", () => {
       const text = `${name}  X:${x} Y:${y} Z:${z}`;
-      navigator.clipboard.writeText(text).then(() => {
+      copyText(text, () => {
         lbl.textContent = "コピーしました!";
         lbl.style.opacity = "1";
         setTimeout(() => { lbl.textContent = name; lbl.style.opacity = ""; }, 1500);
