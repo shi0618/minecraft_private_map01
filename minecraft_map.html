@@ -7,6 +7,15 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* 長押しでの文字選択・画像保存メニューを阻止 */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  /* スライダーの値表示だけは選択できてもいい */
+  .adjust-label span, .coords-bar { -webkit-user-select: text; user-select: text; }
+
   body {
     background: #0d0d1a;
     font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif;
@@ -176,17 +185,17 @@
 <body>
 
 <h1>マイクラ地図 — 座標マップ</h1>
-<p class="subtitle">ホバーで詳細 / ピンクリックで座標コピー</p>
+<p class="subtitle" id="subtitle">ホバーで詳細 / ピンクリックで座標コピー</p>
 
 <!-- 枠調整パネル -->
 <div class="adjust-panel">
   <div class="adjust-row">
-    <div class="adjust-label">左右の枠サイズ <span id="valH">5.5</span>%</div>
-    <input type="range" id="sliderH" min="0" max="15" step="0.1" value="5.5">
+    <div class="adjust-label">左右の枠サイズ <span id="valH">0.8</span>%</div>
+    <input type="range" id="sliderH" min="0" max="15" step="0.1" value="0.8">
   </div>
   <div class="adjust-row">
-    <div class="adjust-label">上下の枠サイズ <span id="valV">5.5</span>%</div>
-    <input type="range" id="sliderV" min="0" max="15" step="0.1" value="5.5">
+    <div class="adjust-label">上下の枠サイズ <span id="valV">1.2</span>%</div>
+    <input type="range" id="sliderV" min="0" max="15" step="0.1" value="1.2">
   </div>
   <div class="adjust-hint">ピンがズレる場合はスライダーで微調整してね / 合ったら下のボタンで値を保存</div>
   <div style="grid-column:1/-1; text-align:center;">
@@ -238,6 +247,32 @@
 </div>
 
 <script>
+// ─── デバイス判定 ─────────────────────────────────────────────
+const isTouchDevice = () =>
+  ('ontouchstart' in window) ||
+  (navigator.maxTouchPoints > 0) ||
+  (navigator.msMaxTouchPoints > 0);
+
+let isMobile = isTouchDevice();
+
+// サブタイトルにデバイス種別を表示
+function updateSubtitle() {
+  const mode = isMobile ? "モバイル版(タッチ)" : "デスクトップ版(マウス)";
+  const hint = isMobile
+    ? "タップでツールチップ / 長押しで座標コピー"
+    : "ホバーで詳細 / クリックで座標コピー";
+  document.getElementById("subtitle").textContent = `[${mode}]  ${hint}`;
+}
+updateSubtitle();
+
+// リサイズ時にも再判定(タブレット回転など)
+window.addEventListener('resize', () => {
+  isMobile = isTouchDevice();
+  updateSubtitle();
+});
+
+console.log(`[MapMode] ${isMobile ? "モバイル(タッチ)" : "デスクトップ(マウス)"}`);
+
 // ─── 実測座標から計算した地図範囲 ───────────────────────────
 // 右下: X=-73,  Z=1975
 // 左下: X=-2120, Z=1975
@@ -287,8 +322,8 @@ const TYPE_COLOR = {
 // ─── 枠オフセット(スライダーで調整可能) ─────────────────────
 // URLパラメータから初期値を復元
 const urlP = new URLSearchParams(location.search);
-let offsetH = parseFloat(urlP.get("oh") || "5.5"); // 左右%
-let offsetV = parseFloat(urlP.get("ov") || "5.5"); // 上下%
+let offsetH = parseFloat(urlP.get("oh") || "0.8"); // 左右%
+let offsetV = parseFloat(urlP.get("ov") || "1.2"); // 上下%
 
 document.getElementById("sliderH").value = offsetH;
 document.getElementById("sliderV").value = offsetV;
@@ -349,25 +384,61 @@ function makePin(config) {
   pin.appendChild(dot);
   pin.appendChild(lbl);
 
-  pin.addEventListener("mouseenter", () => {
-    ttName.textContent  = name;
-    ttType.textContent  = typeLabel || "";
-    ttCoord.textContent = `X: ${x}  Y: ${y}  Z: ${z}`;
-    tooltip.style.display = "block";
-  });
-  pin.addEventListener("mousemove", (e) => {
-    tooltip.style.left = (e.clientX + 14) + "px";
-    tooltip.style.top  = (e.clientY - 36) + "px";
-  });
-  pin.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
-  pin.addEventListener("click", () => {
-    const text = `${name}  X:${x} Y:${y} Z:${z}`;
-    navigator.clipboard.writeText(text).then(() => {
-      lbl.textContent = "コピーしました!";
-      lbl.style.opacity = "1";
-      setTimeout(() => { lbl.textContent = name; lbl.style.opacity = ""; }, 1500);
+  if (isMobile) {
+    // ── タッチ用: タップでツールチップ表示、もう一度タップで閉じる ──
+    pin.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      const alreadyOpen = tooltip.style.display === "block" &&
+                          ttName.textContent === name;
+      if (alreadyOpen) {
+        tooltip.style.display = "none";
+      } else {
+        ttName.textContent  = name;
+        ttType.textContent  = typeLabel || "";
+        ttCoord.textContent = `X: ${x}  Y: ${y}  Z: ${z}`;
+        // ピンの位置を基準にツールチップを表示
+        const rect = pin.getBoundingClientRect();
+        tooltip.style.left = Math.min(rect.left, window.innerWidth - 260) + "px";
+        tooltip.style.top  = (rect.top - 90) + "px";
+        tooltip.style.display = "block";
+      }
     });
-  });
+    // タッチ用コピー(ツールチップが開いてる状態で500ms長押し)
+    let holdTimer = null;
+    pin.addEventListener("touchstart", (e) => {
+      e.preventDefault(); // 長押しメニュー・テキスト選択を阻止
+      holdTimer = setTimeout(() => {
+        const text = `${name}  X:${x} Y:${y} Z:${z}`;
+        navigator.clipboard.writeText(text).then(() => {
+          lbl.textContent = "コピーしました!";
+          lbl.style.opacity = "1";
+          setTimeout(() => { lbl.textContent = name; lbl.style.opacity = ""; }, 1500);
+        });
+      }, 500);
+    });
+    pin.addEventListener("touchend", () => { clearTimeout(holdTimer); });
+  } else {
+    // ── マウス用: 従来通り ──
+    pin.addEventListener("mouseenter", () => {
+      ttName.textContent  = name;
+      ttType.textContent  = typeLabel || "";
+      ttCoord.textContent = `X: ${x}  Y: ${y}  Z: ${z}`;
+      tooltip.style.display = "block";
+    });
+    pin.addEventListener("mousemove", (e) => {
+      tooltip.style.left = (e.clientX + 14) + "px";
+      tooltip.style.top  = (e.clientY - 36) + "px";
+    });
+    pin.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+    pin.addEventListener("click", () => {
+      const text = `${name}  X:${x} Y:${y} Z:${z}`;
+      navigator.clipboard.writeText(text).then(() => {
+        lbl.textContent = "コピーしました!";
+        lbl.style.opacity = "1";
+        setTimeout(() => { lbl.textContent = name; lbl.style.opacity = ""; }, 1500);
+      });
+    });
+  }
 
   pinsLayer.appendChild(pin);
   allPinData.push({ pin, config });
@@ -420,6 +491,13 @@ document.getElementById("saveBtn").addEventListener("click", () => {
 
 // ─── 初回描画 ────────────────────────────────────────────────
 buildPins();
+
+// モバイル: ピン以外タップでツールチップを閉じる
+document.addEventListener("touchend", (e) => {
+  if (!e.target.closest(".pin")) {
+    tooltip.style.display = "none";
+  }
+});
 
 // ─── 画像フォールバック ───────────────────────────────────────
 const mapImg  = document.getElementById("mapImg");
